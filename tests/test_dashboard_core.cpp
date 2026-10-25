@@ -94,6 +94,8 @@ int main() {
   sink.online = false; sink.freeBytes = 100;
   assert(dashboardForwardSerial(sink, half, 256) == 0 && sink.sent == 12);
   size_t templateLength=0;
+  assert(dashboardInspectHttp("POST /api/access HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}", templateLength)==200);
+  assert(dashboardInspectHttp("POST /api/access HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 513\r\n\r\n", templateLength)==413);
   assert(dashboardInspectHttp("POST /api/template HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}", templateLength)==200);
   assert(dashboardInspectHttp("POST /api/template HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: 513\r\n\r\n", templateLength)==413);
   puts("PASS: ring overflow/reboot, queue bounds/FIFO, command validation, timer rollover/read-only deadlines, private paths, HTTP limits/duplicate headers, bounded raw body");

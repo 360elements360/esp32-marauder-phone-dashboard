@@ -2,6 +2,11 @@
 (() => {
   const $ = id => document.getElementById(id);
   let key = sessionStorage.getItem('marauder-key') || '';
+  let firstSetup = false, accessPending = null, accessSaving = false;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('marauder-access-pending'));
+    if (saved && typeof saved.next === 'string' && typeof saved.previous === 'string' && saved.next.length <= 63 && saved.previous.length <= 63) accessPending = saved;
+  } catch {}
   let cursor = 0, bootId = null, pollTimer = 0, polling = false, commandPending = false;
   let activeTab = 'tasks', failures = 0, consoleText = '', history = [], historyIndex = 0;
   const headings = {tasks:['Choose your next task','Wi-Fi, Bluetooth, network and device tools. Guided from start to result.'],advanced:['Advanced tools','The firmware’s manual controls and command reference.'],overview:['Device status','Everything on your board, within reach.'],commands:['Command library','The program’s controls, ready when you are.'],console:['Live console','Direct access to the Marauder command interface.'],files:['Device files','Capture and log files, stored locally.'],settings:['Program settings','Configure the firmware and manage your session.']};
@@ -60,15 +65,72 @@
     $('stop').disabled = false;
     window.MarauderFlow.update(status);
   }
+  function showAccess() {
+    if (accessPending) return message('Reconnect Wi-Fi to finish the password change.', true);
+    $('access-title').textContent = firstSetup ? 'Choose your device password' : 'Wi-Fi access';
+    $('access-current').hidden = firstSetup;
+    $('access-password').value = firstSetup ? '' : key;
+    $('access-new').value = ''; $('access-confirm').value = '';
+    $('access-show').checked = false;
+    for (const id of ['access-password','access-new','access-confirm']) $(id).type = 'password';
+    $('access-error').textContent = ''; $('access-close').hidden = firstSetup;
+    if (!$('access-dialog').open) $('access-dialog').showModal();
+  }
+  function forgetPending() { accessPending = null; sessionStorage.removeItem('marauder-access-pending'); }
+  async function readStatus() {
+    let status;
+    try { status = await json('/api/status', accessPending ? {headers:{'X-Device-Key':accessPending.next}} : undefined); if (accessPending) key = accessPending.next; }
+    catch (error) {
+      if (error.status !== 401 || !accessPending) throw error;
+      status = await json('/api/status', {headers:{'X-Device-Key':accessPending.previous}});
+      if (status.accessChanging) return status;
+      key = accessPending.previous;
+      message('Change was not applied. Your previous password still works.', true);
+    }
+    if (accessPending) {
+      if (key === accessPending.next) message('Connected with your new password.');
+      sessionStorage.setItem('marauder-key', key); forgetPending(); failures = 0;
+    }
+    firstSetup = !!status.setupRequired;
+    if (firstSetup && !$('access-dialog').open) showAccess();
+    return status;
+  }
+  async function saveAccess(event) {
+    event.preventDefault();
+    if (accessSaving || accessPending) return;
+    const next = $('access-new').value;
+    const error = text => { $('access-error').textContent = text; };
+    if (!/^[ -~]{8,63}$/.test(next) || next !== next.trim()) return error('Use 8 to 63 ASCII characters with no leading or trailing spaces.');
+    if (next !== $('access-confirm').value) return error('Passwords do not match.');
+    if (next === key || next === 'marauder-setup') return error('Choose a different password; the setup password is reserved.');
+    accessSaving = true; $('access-save').disabled = true; $('access-close').disabled = true; clearTimeout(pollTimer);
+    while (polling) await new Promise(resolve => setTimeout(resolve, 25));
+    let uncertain = false;
+    try { await json('/api/access', {method:'POST', body:JSON.stringify({password:next})}); }
+    catch (failure) {
+      if (failure.status) { error(failure.message); accessSaving = false; $('access-save').disabled = false; $('access-close').disabled = false; schedule(); return; }
+      uncertain = true;
+    }
+    accessPending = {previous:key,next};
+    sessionStorage.setItem('marauder-access-pending', JSON.stringify(accessPending));
+    key = next; sessionStorage.setItem('marauder-key', key);
+    $('access-dialog').close(); $('access-password').value = ''; $('access-new').value = ''; $('access-confirm').value = '';
+    accessSaving = false; $('access-save').disabled = false; $('access-close').disabled = false; showTab('settings'); failures = 0;
+    message((uncertain ? 'Save receipt is uncertain. ' : 'Password saved. ') + 'Reconnect to ' + $('ssid').textContent + ' using your new Wi-Fi password. If it fails, try the previous password. This page checks access without resending the change.');
+    connection('Reconnect Wi-Fi', 'disconnected'); pollTimer = setTimeout(poll, 2000);
+  }
   function schedule() {
     clearTimeout(pollTimer);
-    if (key && !document.hidden) pollTimer = setTimeout(poll, Math.min(15000, 2000 * Math.max(1, failures)));
+    if (key && !accessSaving && !document.hidden) pollTimer = setTimeout(poll, Math.min(15000, 2000 * Math.max(1, failures)));
   }
   async function poll() {
-    if (!key || polling || document.hidden) return;
+    if (!key || polling || accessSaving || document.hidden) return;
     polling = true;
     try {
-      update(await json('/api/status'));
+      const status = await readStatus();
+      if (accessSaving) return;
+      update(status);
+      if (firstSetup || accessPending) return;
       const log = await json('/api/log?cursor=' + cursor);
       cursor = log.cursor;
       if (log.lost) append('\n[Older output was overwritten in the device’s fixed-size log]\n');
@@ -77,11 +139,12 @@
       failures = 0;
       connection('Connected', 'connected');
     } catch (error) {
+      if (accessSaving) return;
       failures++;
       if (error.status === 401) { lock(); $('login-error').textContent = error.message; }
       else {
         connection('Disconnected', 'disconnected');
-        message('Connection lost. A radio operation may have changed Wi-Fi. Wait for its timer, reconnect to the device network, and this page will reconnect automatically. Commands are never resent.', true);
+        message(accessPending ? 'Reconnect your phone to the device Wi-Fi using the new password. If it fails, try the previous password. This page never repeats password changes.' : 'Connection lost. A radio operation may have changed Wi-Fi. Wait for its timer, reconnect to the device network, and this page will reconnect automatically. Commands are never resent.', true);
       }
     } finally { polling = false; schedule(); }
   }
@@ -179,7 +242,8 @@
     if (!commands.length) $('catalog').textContent = 'No matching commands. You can still enter commands directly in the console.';
   }
   function lock() {
-    key = ''; sessionStorage.removeItem('marauder-key'); clearTimeout(pollTimer);
+    key = ''; sessionStorage.removeItem('marauder-key'); forgetPending(); clearTimeout(pollTimer);
+    $('access-dialog').close(); $('access-password').value = ''; $('access-new').value = ''; $('access-confirm').value = '';
     $('dashboard').hidden = true; $('unlock').hidden = false; $('stop').disabled = true;
     $('device-password').value = ''; cursor = 0; bootId = null; consoleText = ''; $('console').textContent = '';
     connection('Locked', '');
@@ -189,15 +253,21 @@
     const button = $('login-form').querySelector('button'); button.disabled = true;
     $('login-error').textContent = '';
     try {
-      const status = await json('/api/status');
+      const status = await readStatus();
       sessionStorage.setItem('marauder-key', key);
       $('device-password').value = '';
       $('unlock').hidden = true; $('dashboard').hidden = false;
-      update(status); connection('Connected', 'connected'); showTab(activeTab);
+      update(status); connection('Connected', 'connected'); showTab(firstSetup || accessPending ? 'settings' : activeTab);
       await poll();
     } catch (error) { lock(); $('login-error').textContent = error.status ? error.message : 'Device unavailable. Connect to the board’s Wi-Fi and try again.'; }
     finally { button.disabled = false; }
   }
+  $('first-setup').onclick = () => unlock('marauder-setup');
+  $('access-open').onclick = showAccess;
+  $('access-form').onsubmit = saveAccess;
+  $('access-close').onclick = () => { $('access-dialog').close(); $('access-password').value = ''; $('access-new').value = ''; $('access-confirm').value = ''; };
+  $('access-dialog').oncancel = event => { if (firstSetup || accessSaving) event.preventDefault(); };
+  $('access-show').onchange = () => { for (const id of ['access-password','access-new','access-confirm']) $(id).type = $('access-show').checked ? 'text' : 'password'; };
   $('login-form').onsubmit = event => { event.preventDefault(); unlock($('device-password').value); };
   $('command-form').onsubmit = event => { event.preventDefault(); run($('command-input').value); };
   $('settings-form').onsubmit = event => { event.preventDefault(); showTab('console'); run('settings -s ' + $('setting-name').value + ' ' + $('setting-value').value); };

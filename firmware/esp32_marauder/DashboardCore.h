@@ -24,7 +24,7 @@ inline int dashboardInspectHttp(const char* input, size_t& requestLength) {
   if (!lineEnd || lineEnd - input > 256) return 414;
   const bool post = !strncmp(input, "POST ", 5);
   if (!post && strncmp(input, "GET ", 4)) return 405;
-  if (post && strncmp(input, "POST /api/command ", 18) && strncmp(input, "POST /api/file/delete ", 22) && strncmp(input, "POST /api/workflow ", 19) && strncmp(input,"POST /api/template ",19)) return 404;
+  if (post && strncmp(input, "POST /api/command ", 18) && strncmp(input, "POST /api/file/delete ", 22) && strncmp(input, "POST /api/workflow ", 19) && strncmp(input,"POST /api/template ",19) && strncmp(input,"POST /api/access ",17)) return 404;
   bool lengthSeen = false, typeSeen = false, json = false;
   size_t bodyLength = 0;
   auto equal = [](const char* start, size_t length, const char* expected) {

@@ -2,6 +2,7 @@
 #include "configs.h"
 #ifdef MARAUDER_DASHBOARD
 #include "DashboardCore.h"
+#include "DashboardAccess.h"
 #include "WorkflowCore.h"
 #include "ToolBridge.h"
 #include <ArduinoJson.h>
@@ -20,7 +21,8 @@ class DeviceDashboard {
   char workflowError_[161] = {}, capturePath_[129] = {};
   uint32_t workflowAt_ = 0, workflowOperation_ = 0;
   bool workflowStopped_ = false;
-  char password_[17] = {}, ssid_[24] = {}, logChunk_[1025] = {};
+  DashboardAccess access_;
+  char ssid_[24] = {}, logChunk_[1025] = {};
   uint32_t boot_ = 0, pendingAt_ = 0, retryAt_ = 0, operation_ = 0;
   bool listening_ = false;
   bool authorized(bool mutation = false);
@@ -28,6 +30,7 @@ class DeviceDashboard {
   void status();
   void logs();
   void command();
+  void changeAccess();
   void targets();
   void workflow();
   void workflowStatus(JsonObject object);

@@ -25,6 +25,13 @@ def catalog():
         entries.append({"command":command,"syntax":syntax,"group":group})
     return entries
 
+def compact_script(source):
+    # Preserve newlines (including ASI) and every character inside string literals.
+    # Multiline templates/escaped continuations opt out of indentation removal.
+    if '`' in source or re.search(r'\\[ \t]*$', source, re.M):
+        return source
+    return '\n'.join(line.lstrip(' \t') for line in source.splitlines())
+
 def pack():
     generate_tools()
     entries = catalog()
@@ -45,7 +52,7 @@ def pack():
     pattern = r'<script src="([a-zA-Z0-9_-]+\.js)" defer></script>'
     scripts = re.findall(pattern, page)
     if not scripts or scripts[-1] != 'app.js': raise ValueError('Dashboard app must initialize after its modules')
-    inline = '\n'.join((ROOT / 'web' / name).read_text(encoding='utf-8-sig') for name in scripts)
+    inline = '\n'.join(compact_script((ROOT / 'web' / name).read_text(encoding='utf-8-sig')) for name in scripts)
     # Inline defer is ineffective: initialize modules in source order after the DOM.
     page = re.sub(pattern, '', page).replace('</body>', '<script>' + inline + '</script></body>')
     raw = page.encode("utf-8")

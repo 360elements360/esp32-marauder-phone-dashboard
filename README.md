@@ -112,24 +112,41 @@ write only the application at `0x10000` to preserve settings and files:
 python -m esptool --chip esp32s3 --port COM9 write-flash 0x10000 artifacts/esp32_marauder.ino.bin
 ```
 
-### 3. Open the dashboard
+### 3. Set up from your phone
 
-1. Open the board's USB serial console at **115200 baud**.
-2. Send `dashboard` followed by a newline. It prints the Wi-Fi name, password,
-   and dashboard address.
-3. Join the board's `Marauder-xxxxxx` Wi-Fi network. Stay connected when your
-   computer or phone reports that the network has no internet.
-4. Open **http://192.168.4.1** and enter the same device password.
-5. Open **Tasks**, choose a task, and follow its prompts.
+For a **new installation** with no saved dashboard password:
 
-The board generates its own random 16-character password and preserves it across
-restarts. It prints credentials only over USB. The browser stores the password
-for the current tab's session; **Lock dashboard** removes it. No device password
-or saved Wi-Fi profile is included in this repository.
+1. Power the board from USB or a power bank.
+2. Join its `Marauder-xxxxxx` Wi-Fi network using **`marauder-setup`**.
+   Stay connected when your phone reports that the network has no internet.
+3. Open **http://192.168.4.1** and tap **Set up new device**.
+4. Choose and confirm your own password. Use **8–63 ASCII characters** with no
+   leading or trailing spaces. This password unlocks both Wi-Fi and the dashboard.
+5. Reconnect your phone to the same Wi-Fi network with your new password.
+   If your phone retains the setup password, forget the network and join again.
+   The page reconnects automatically; open **Tasks** to begin.
 
-If opening a serial monitor leaves the board in ROM download mode, configure
-DTR and RTS as deasserted before opening the port. The included device-test
-helper handles this automatically.
+The setup password cannot run tools or download files. You must choose your own
+password first. The board stores it across restarts and power cycles, so no
+computer or home Wi-Fi is needed for subsequent use.
+
+**Updating an existing installation preserves its current password.** Connect
+with that password and unlock the page normally. To show it or choose another,
+open **Settings → Wi-Fi access**. Password changes require an idle device and
+briefly disconnect Wi-Fi. Other browser sessions must use the new password too.
+If a save response is lost, the page checks which password works and never
+repeats the change automatically.
+
+The browser holds credentials only in the current tab's session; **Lock dashboard**
+clears them. A pending change temporarily retains the previous and new passwords
+in that session to recover a lost response. No private device password or saved
+Wi-Fi profile is included in this repository.
+
+If you forget the password, open native USB serial at **115200 baud** and send
+`dashboard` followed by a newline. Credentials also print there at startup, never
+in the web console log. A serial monitor should open with DTR and RTS deasserted
+if its defaults leave the board in ROM download mode; the included device-test
+helper does this automatically.
 
 ## Radio behavior and limits
 
@@ -156,9 +173,9 @@ full storage. Settings and credentials are excluded from file downloads.
 
 | Resource | Current build or limit |
 | --- | --- |
-| Website, including task catalog | 32,007 bytes gzip; build limit below 32 KiB |
-| Application | 1,618,144 bytes in the validated build |
-| Static RAM | 95,724 bytes in the validated build |
+| Website, including task catalog | 32,361 bytes gzip; build limit below 32 KiB |
+| Application | 1,620,384 bytes in the validated build |
+| Static RAM | 95,844 bytes in the validated build |
 | Application partitions | Two 3 MB slots |
 | Internal SPIFFS | Approximately 9.9 MB |
 | Console ring / log response | 8 KiB / 1 KiB |
@@ -191,6 +208,7 @@ For browser tests, install Python Playwright and Chromium:
 python -m pip install playwright pyserial
 python -m playwright install chromium
 python scripts/test_tool_coverage.py
+python scripts/test_access.py
 python scripts/test_core.py
 python scripts/test_workflow_core.py
 python scripts/test_tool_core.py
@@ -215,7 +233,12 @@ they can start radio tasks and create test files:
 python scripts/test_device.py --help
 python scripts/test_workflow_device.py --help
 python scripts/test_tools_device.py --help
+python scripts/test_access_device.py --help
 ```
+
+The password test temporarily changes credentials and the Windows Wi-Fi profile,
+checks the real mobile layout and restart persistence, then restores the original
+password and profile. It never resets NVS or prints passwords.
 
 The N16R8 build has been physically checked for authentication, PSRAM, passive
 Wi-Fi/BLE workflows, timed capture and download, recovery, cancellation, target

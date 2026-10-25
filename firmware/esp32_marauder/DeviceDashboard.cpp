@@ -26,8 +26,8 @@ void DeviceDashboard::reply(int code, const char* message) {
 
 bool DeviceDashboard::authorized(bool mutation) {
   http_.sendHeader("Cache-Control", "no-store");
-  if (http_.header("X-Device-Key") != password_) {
-    reply(401, "Enter the device password printed over USB. Use 'dashboard' to show it again.");
+  if (http_.header("X-Device-Key") != access_.password()) {
+    reply(401, "Enter your device password. New installation? Use Set up new device.");
     return false;
   }
   if (mutation && http_.hasHeader("Origin") &&
@@ -35,12 +35,17 @@ bool DeviceDashboard::authorized(bool mutation) {
     reply(403, "Cross-origin commands are disabled.");
     return false;
   }
+  if ((access_.setupRequired() || access_.changing()) && http_.uri() != "/api/status" &&
+      !(http_.uri() == "/api/access" && !access_.changing())) {
+    reply(409, access_.changing() ? "Wi-Fi password is changing; reconnect with the new password." : "Choose your own Wi-Fi password before using the device.");
+    return false;
+  }
   return true;
 }
 
 void DeviceDashboard::credentials() {
   // Deliberately bypass the mirrored log: credentials must only appear on USB.
-  dashboardNativeSerial().printf("\nDashboard Wi-Fi: %s\nPassword: %s\nOpen: http://192.168.4.1\n", ssid_, password_);
+  dashboardNativeSerial().printf("\nDashboard Wi-Fi: %s\nPassword: %s\nOpen: http://192.168.4.1\n", ssid_, access_.password());
 }
 
 void DeviceDashboard::diagnostics() {
@@ -92,12 +97,7 @@ void DeviceDashboard::begin() {
   Preferences prefs;
   prefs.begin("dashboard", false);
   String saved = prefs.getString("password", "");
-  if (saved.length() != 16) {
-    snprintf(password_, sizeof(password_), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
-    prefs.putString("password", password_);
-  } else {
-    saved.toCharArray(password_, sizeof(password_));
-  }
+  access_.load(saved.c_str(), saved.length());
   prefs.end();
   const char* keys[] = {"X-Device-Key", "Origin"};
   http_.collectHeaders(keys, 2);
@@ -110,6 +110,7 @@ void DeviceDashboard::begin() {
   });
   http_.on("/api/status", HTTP_GET, [this]() { if (authorized()) status(); });
   http_.on("/api/log", HTTP_GET, [this]() { if (authorized()) logs(); });
+  http_.on("/api/access", HTTP_POST, [this]() { if (authorized(true)) changeAccess(); }, [this]() { bodyChunk(); });
   http_.on("/api/command", HTTP_POST, [this]() { if (authorized(true)) command(); }, [this]() { bodyChunk(); });
   http_.on("/api/targets", HTTP_GET, [this]() { if (authorized()) targets(); });
   http_.on("/api/workflow", HTTP_POST, [this]() { if (authorized(true)) workflow(); }, [this]() { bodyChunk(); });
@@ -135,7 +136,7 @@ void DeviceDashboard::restoreAP() {
   }
   const IPAddress ip(192, 168, 4, 1);
   WiFi.softAPConfig(ip, ip, IPAddress(255, 255, 255, 0));
-  if (!WiFi.softAP(ssid_, password_, 1, false, 2)) {
+  if (!WiFi.softAP(ssid_, access_.password(), 1, false, 2)) {
     retryAt_ = millis() + 3000;
     return;
   }
@@ -172,6 +173,8 @@ void DeviceDashboard::status() {
   doc["remaining"] = timer_.remaining(millis());
   doc["queued"] = queue_.size();
   doc["ssid"] = ssid_;
+  doc["setupRequired"] = access_.setupRequired();
+  doc["accessChanging"] = access_.changing();
   doc["clients"] = WiFi.softAPgetStationNum();
   doc["sd"] = false;
   doc["gps"] = false;
@@ -329,6 +332,11 @@ void DeviceDashboard::workflow() {
 
 bool DeviceDashboard::manualAllowed(const char* command) {
   if (toolDispatch_) return true;
+  if (access_.changing()) {
+    if (!strcmp(command, "dashboard")) return true;
+    Serial.println("[Dashboard] Wi-Fi password is changing; wait for recovery.");
+    return false;
+  }
   if (!workflow_.active()) return true;
   if (workflowManualAllowed(true, command)) {
     endWorkflow(WorkflowState::Cancelled);
@@ -428,6 +436,34 @@ void DeviceDashboard::workflowLoop(uint32_t now) {
   }
 }
 
+void DeviceDashboard::changeAccess() {
+  if (workflow_.active() || queue_.size() || !dashboardTargetsIdle()) {
+    reply(409, "Stop the active task before changing the Wi-Fi password."); return;
+  }
+  if (!toolSafeJson(body_.data()) || memchr(body_.data(), 0, body_.size())) {
+    reply(400, "Null characters are not allowed in passwords."); return;
+  }
+  StaticJsonDocument<256> doc;
+  if (!body_.valid() || deserializeJson(doc, body_.data(), body_.size()) || !doc["password"].is<const char*>()) {
+    reply(400, "Expected a new password."); return;
+  }
+  const char* value = doc["password"];
+  const size_t length = strlen(value);
+  if (!DashboardAccess::valid(value, length)) {
+    reply(400, "Use 8 to 63 ASCII characters with no leading or trailing spaces."); return;
+  }
+  if (!access_.canChange(value, length)) {
+    reply(400, "Choose a different password; the setup password is reserved."); return;
+  }
+  Preferences prefs;
+  if (!prefs.begin("dashboard", false)) { reply(500, "Could not open credential storage."); return; }
+  const bool saved = prefs.putString("password", value) == length;
+  prefs.end();
+  if (!saved) { reply(500, "Could not save password; the current password is unchanged."); return; }
+  access_.stage(value, length, millis());
+  reply(200, "Password saved. Reconnect Wi-Fi using the new password.");
+}
+
 void DeviceDashboard::command() {
   if (!body_.valid()) { reply(413, "Command request too large"); return; }
   StaticJsonDocument<768> doc;
@@ -500,6 +536,12 @@ void DeviceDashboard::deleteFile() {
 void DeviceDashboard::loop() {
   if (listening_) http_.handleClient();
   const uint32_t now = millis();
+  if (access_.apply(now)) {
+    // Disconnect clients using the old WPA key before recreating the AP.
+    suspend();
+    WiFi.softAPdisconnect(false);
+    restoreAP();
+  }
   workflowLoop(now);
   if (timer_.expired(now)) {
     Serial.println("[Dashboard] Run timer ended; restoring control Wi-Fi");

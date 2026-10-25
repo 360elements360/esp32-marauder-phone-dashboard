@@ -28,7 +28,7 @@ def credentials(port):
             captured.extend(device.read(max(1, device.in_waiting)))
             found = re.search(r'Dashboard Wi-Fi: ([^\r\n]+)\r?\nPassword: ([^\r\n]+)', captured.decode('utf-8', errors='replace'))
             if found:
-                result = {'ssid':found[1].strip(), 'password':found[2].strip(), 'address':'http://' + HOST, 'port':port}
+                result = {'ssid':found[1].strip(), 'password':found[2], 'address':'http://' + HOST, 'port':port}
                 (ROOT / '.cache/device-credentials.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
                 (ROOT / '.cache/DEVICE-ACCESS.txt').write_text(
                     f"Dashboard: {result['address']}\nWi-Fi network: {result['ssid']}\n"

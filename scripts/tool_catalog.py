@@ -258,7 +258,16 @@ def generate():
     header += '};\nstatic const unsigned TOOL_CATALOG_COUNT = sizeof(TOOL_CATALOG)/sizeof(TOOL_CATALOG[0]);\n'
     (ROOT/'firmware/esp32_marauder/ToolCatalog.h').write_text(header,encoding='utf-8')
     public = [{k:v for k,v in row.items() if k not in ('steps','modes','select','check','secret')} for row in rows]
-    (ROOT/'web/tools.js').write_text('window.MARAUDER_TOOLS='+json.dumps(public,ensure_ascii=True,separators=(',',':'))+';\n',encoding='utf-8')
+    # Omit repeated defaults on the wire; the browser restores the exact metadata.
+    compact = []
+    for row in public:
+        defaults = dict(available=True, reason='', fields=[], timed=False, description=row['title'] + '.')
+        item = {k:v for k,v in row.items() if k not in defaults or v != defaults[k]}
+        if item.get('fields'):
+            item['fields'] = [{k:v for k,v in f.items() if (k,v) not in (('required',True),('type','text'))} for f in item['fields']]
+        compact.append(item)
+    restore = ".map(t=>({available:true,reason:'',timed:false,description:t.title+'.',...t,fields:(t.fields||[]).map(f=>({type:'text',required:true,...f}))}));\n"
+    (ROOT/'web/tools.js').write_text('window.MARAUDER_TOOLS='+json.dumps(compact,ensure_ascii=True,separators=(',',':'))+restore,encoding='utf-8')
     (ROOT/'.cache').mkdir(exist_ok=True)
     (ROOT/'.cache/tool-catalog.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
     print(f'PASS: generated {len(rows)} guided definitions ({sum(r["available"] for r in rows)} available)')
