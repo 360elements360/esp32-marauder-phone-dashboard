@@ -1,10 +1,20 @@
-# Marauder S3 Dashboard
+# ESP32 Marauder Phone Dashboard
 
-**A lightweight, device-hosted web interface for ESP32 Marauder on the ESP32-S3 N16R8.**
+**Control ESP32 Marauder from your phone, tablet, or laptop over Wi-Fi.**
+
+After installation, just power the **ESP32-S3 N16R8** board and open your browser.
+The board hosts the dashboard on its own Wi-Fi network: no app, cloud account,
+home Wi-Fi, or internet connection is needed for everyday use.
+
+**Initial installation requires a computer and a USB connection.** After that,
+you only need the flashed board, USB power or a power bank, and a phone, tablet,
+or laptop with Wi-Fi and a browser. No display or SD card is required.
 
 Choose a task, select a target, enter the requested settings, review, and run.
-The board serves the entire website over its own Wi-Fi: no cloud account,
-frontend framework, CDN, or internet connection is needed after installation.
+
+For everyday use, power the board, join its `Marauder-xxxxxx` Wi-Fi network,
+and open **http://192.168.4.1**. First-time password setup is explained below
+under **Set up from your phone**.
 
 This independent project is based on [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder)
 v1.19.2 and targets the bare **ESP32-S3 N16R8**. Use radio and network testing
@@ -32,7 +42,7 @@ functions only on equipment and networks you own or are authorized to test.
 The supplied screenshot shows the task catalog, including hardware limitations.
 The published PNG contains no metadata chunks; its image data is unchanged.
 
-![Marauder S3 Dashboard showing the complete categorized task catalog](docs/images/dashboard.png)
+![ESP32 Marauder Phone Dashboard showing the complete categorized task catalog](docs/images/dashboard.png)
 
 </details>
 
@@ -61,8 +71,8 @@ and [esptool](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/inst
 Run the following from a terminal:
 
 ```sh
-git clone https://github.com/360elements360/marauder-s3-dashboard.git
-cd marauder-s3-dashboard
+git clone https://github.com/360elements360/esp32-marauder-phone-dashboard.git
+cd esp32-marauder-phone-dashboard
 python -m pip install esptool
 arduino-cli core install esp32:esp32@3.3.11 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
 python scripts/build.py
